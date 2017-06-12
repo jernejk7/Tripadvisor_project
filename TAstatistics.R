@@ -17,7 +17,7 @@ print(povp)
 vpovp<-tabela %>% summarise(Total_mean=mean(rating)) 
 print(vpovp)
 
-#Število ocen po kategorijah 
+#stevilo ocen po kategorijah 
 stocen<-tabela %>% group_by(Location) %>% summarise(NumberOfRatings=n()) %>% arrange(desc(NumberOfRatings))
 print(stocen)
 
@@ -53,7 +53,7 @@ custom_stop_words
 
 tekst <- tekst %>% anti_join(custom_stop_words)
 
-#št najpogostejših besed v bazi  ....potrebno izbrisati besedo hotel
+#št najpogostejših besed v bazi 
 tekst %>% count(word, sort=TRUE)
 
 #graf najpogostejših besed 
@@ -123,6 +123,8 @@ cor.test(data = freq[freq$Location == "Seaside",],
          ~ proportion + `Ski_resort`)
 
 # Sentiment -----------------------------------------------------------------------------------------------------
+# najpogostejse custveno pozitivne in negativne besede
+#words “happy” and “like” will be counted as positive, even in a sentence like “I’m not happy and I don’t like it!”
 
 # morje 
 bing_wc_sea <- tsea %>% inner_join(get_sentiments("bing")) %>% count(word, sentiment, sort = TRUE) %>% ungroup()
@@ -225,9 +227,9 @@ besedeh<-unnest_tokens(tabela, word, fullrev, drop=TRUE) %>%
 print(besedeh)
 
 #stopwords
-mystopwords<-data_frame(word = c("piran","tartini","kempinski", "0430", "0435", "043e", "0442",
+mystopwords<-data_frame(word = c("piran","tartini","kempinski",
                                  "koper", "lek", "skipass", "habakuk", "kompas", "olimia", "rimske",
-                                 "rogaska", "lasko", "rimski", "thermana", "Slatina", "thermalia", "roga�ka"))
+                                 "rogaska", "lasko", "rimski", "thermana", "Slatina", "thermalia", "roga?ka"))
 besedeh<- anti_join(besedeh, mystopwords, by= "word")
 
 besedet<- besedeh %>% group_by(Location) %>% summarize(total=sum(n))
@@ -264,3 +266,152 @@ gbesedeh %>%
   labs(x = NULL, y = "tf-idf") +
   facet_wrap(~Location, ncol = 2, scales = "free") +
   coord_flip()
+
+
+#Tokenizing by n-gram-------------------------------------------------------------------------------------------
+#trigrams
+
+trigrams<-unnest_tokens(select(tabela, Location, fullrev), trigram, fullrev ,token = "ngrams", n = 3)%>% 
+  separate(trigram, c("word1", "word2", "word3"), sep= " ") %>%
+  filter(!word1 %in% custom_stop_words$word,
+         !word2 %in% custom_stop_words$word, 
+         !word3 %in% custom_stop_words$word) %>% 
+  count(word1, word2, word3, sort = TRUE)
+
+trigrams_sea <- trigrams %>% filter(Location =="Seaside")
+
+#bigrams
+
+bigrams<-unnest_tokens(select(tabela, Location , fullrev), bigram, fullrev ,token = "ngrams", n = 2)
+bigrams %>% count(bigram, sort=TRUE)
+
+bigrams_sep <- bigrams %>% separate(bigram, c("word1", "word2"), sep = " ")
+
+bigrams_filt<- bigrams_sep %>% 
+  filter(!word1 %in% custom_stop_words$word) %>%
+  filter(!word2 %in% custom_stop_words$word)
+
+
+bigram_count <- bigrams_filt %>% 
+  count(word1, word2, sort =TRUE)
+
+bigrams_united <- bigrams_filt %>%
+  unite(bigram, word1, word2, sep = " ")
+
+bigrams_united
+
+
+bigrams_sea<-bigrams_united %>% filter(Location=="Seaside")
+bigrams-ski<-bigrams_united %>% filter(Location=="Ski_resort")
+bigrams_spa<-bigrams_united %>% filter(Location=="Spa")
+
+#tf-idf bigrams
+bigram_tf_idf <- bigrams_united %>% 
+  count(Location, bigram) %>% 
+  bind_tf_idf(bigram, Location, n) %>% 
+  arrange(desc(tf_idf))
+bigram_tf_idf
+
+bigram_tf_idf %>% 
+  group_by(Location) %>% 
+  top_n(15, tf_idf) %>% 
+  ungroup() %>%
+  mutate(bigram = reorder(bigram, tf_idf)) %>%
+  ggplot(aes(bigram, tf_idf, fill = Location)) +
+  geom_col(show.legend = FALSE) +
+  labs(x = NULL, y = "tf-idf") +
+  facet_wrap(~Location, ncol = 2, scales = "free") +
+  coord_flip()
+#The reviews are disthinguished mostly by the names of the hotels, places ... 
+
+
+
+#Visualizing
+library(igraph)
+library(ggraph)
+
+set.seed(2017)
+
+bigram_graph <- bigram_count %>%
+  filter(n>20) %>% 
+  graph_from_data_frame()
+
+ggraph(bigram_graph, layout = "fr") +
+  geom_edge_link() +
+  geom_node_point() +
+  geom_node_text(aes(label = name), vjust = 1, hjust = 1)
+
+#za lepsi prikaz
+set.seed(2016)
+
+a <- grid::arrow(type = "closed", length = unit(.10, "inches"))
+
+ggraph(bigram_graph, layout = "fr") +
+  geom_edge_link(aes(edge_alpha = n), show.legend = FALSE,
+                 arrow = a, end_cap = circle(.07, 'inches')) +
+  geom_node_point(color = "lightblue", size = 3) +
+  geom_node_text(aes(label = name), vjust = 1, hjust = 1) +
+  theme_void()
+
+#visualization morje
+bigram_count_sea <- bigrams_filt%>% 
+  filter(Location=="Seaside")%>%
+  count(word1, word2, sort =TRUE)
+
+bigram_graph_sea <- bigram_count_sea %>%
+  filter(n>20) %>% 
+  graph_from_data_frame()
+
+
+set.seed(2016)
+a <- grid::arrow(type = "closed", length = unit(.10, "inches"))
+
+ggraph(bigram_graph_sea, layout = "fr") +
+  geom_edge_link(aes(edge_alpha = n), show.legend = FALSE,
+                 arrow = a, end_cap = circle(.07, 'inches')) +
+  geom_node_point(color = "lightblue", size = 3) +
+  geom_node_text(aes(label = name), vjust = 1, hjust = 1) +
+  theme_void()
+
+#visualization smucisce
+bigram_count_ski <- bigrams_filt%>% 
+  filter(Location=="Ski_resort")%>%
+  count(word1, word2, sort =TRUE)
+
+bigram_graph_ski <- bigram_count_ski %>%
+  filter(n>20) %>% 
+  graph_from_data_frame()
+
+
+set.seed(2016)
+a <- grid::arrow(type = "closed", length = unit(.10, "inches"))
+
+ggraph(bigram_graph_ski, layout = "fr") +
+  geom_edge_link(aes(edge_alpha = n), show.legend = FALSE,
+                 arrow = a, end_cap = circle(.07, 'inches')) +
+  geom_node_point(color = "lightblue", size = 3) +
+  geom_node_text(aes(label = name), vjust = 1, hjust = 1) +
+  theme_void()
+
+#visualization spa
+bigram_count_spa <- bigrams_filt%>% 
+  filter(Location=="Spa")%>%
+  count(word1, word2, sort =TRUE)
+
+bigram_graph_spa <- bigram_count_spa %>%
+  filter(n>20) %>% 
+  graph_from_data_frame()
+
+
+set.seed(2016)
+a <- grid::arrow(type = "closed", length = unit(.10, "inches"))
+
+ggraph(bigram_graph_spa, layout = "fr") +
+  geom_edge_link(aes(edge_alpha = n), show.legend = FALSE,
+                 arrow = a, end_cap = circle(.07, 'inches')) +
+  geom_node_point(color = "lightblue", size = 3) +
+  geom_node_text(aes(label = name), vjust = 1, hjust = 1) +
+  theme_void()
+
+
+
